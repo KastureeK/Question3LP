@@ -1,0 +1,236 @@
+model "Production Planning"
+uses "mmxprs"
+
+declarations
+  !Conventions followed for declarations
+  !Indicate Constants by ALL CAPITALS
+  !Indicate Variables by Camel Casing
+  STUDENTNUMBER: integer
+  !We accept a student number as requested
+  STUDENTNUMBERTEMP: array(1..8) of integer
+  !Temporary array that will be used to replace 0s by 5s in the STUDENTNUMBER
+  BASEPRODLEVEL: real
+  !Our Production levels at the beginning before the first quarter and the last quarter (i.e Start and End in the Report)
+  STARTANDENDSTOCK: real
+  !Our Stock levels at the beginning of Quarter1 and end of Quarter4
+  PRODCHANGEUNITCOST: real
+  !Per unit cost applicable whenever the production level is modified (includes both increase / decrease within the Normal Production range)
+  INVENTORYUNITCOST: real
+  !Per unit cost of storage in Inventory after the Demands of that quarter are met
+  PRODUCTIONCOST: real
+  !Per unit cost of Normal Production per quarter
+  NUMBEROFCONSTRAINTS = 1..5
+  !Consider constraints to compare between each two quarters
+  OTHERCONSTRAINTS = 1..4
+  !Consider constraints to compare between each two quarters
+  NUMBEROFQUARTERS = 0..5
+  !Consider number of quarters as 6 in total including Start, Q1, Q2, Q3, Q4 and End
+  DEMAND: array(0..5) of real
+  !Demands per quarter as predicted beforehand
+end-declarations
+
+initialisations from "ProblemThree.dat"
+!We initialise the values of our constants and variables across the same period using a data file
+  STUDENTNUMBER
+  BASEPRODLEVEL
+  STARTANDENDSTOCK
+  PRODCHANGEUNITCOST
+  INVENTORYUNITCOST
+  PRODUCTIONCOST
+  DEMAND
+end-initialisations
+
+declarations
+!Based on the initialisations received from the data file, we declare our list of constraints and variables across each quarter
+  ProdConstr:  array(NUMBEROFCONSTRAINTS) of linctr
+  !array of Total Production constraints
+  NormalProdConstr: array(NUMBEROFCONSTRAINTS) of linctr
+  !array of Normal Production constraints
+  OverProdConstr: array(OTHERCONSTRAINTS) of linctr
+  !array of Over Production constraints
+  StockConstr: array(OTHERCONSTRAINTS) of linctr
+  !array of Stock constraints
+  Production:  array(NUMBEROFQUARTERS) of mpvar
+  !Total number of units produced by quarter
+  NormalProduction:  array(NUMBEROFQUARTERS) of mpvar
+  !Number of units produced by quarter within the Normal Production Level
+  Increase:    array(NUMBEROFQUARTERS) of mpvar
+  !Increase in Production Level by quarter
+  Decrease:    array(NUMBEROFQUARTERS) of mpvar
+  !Decrease in Production Level by quarter
+  OverProdCapacity: array(NUMBEROFQUARTERS) of mpvar
+  !Maximum Capacity for over production within that quarter
+  EndOfQuarterStock:    array(NUMBEROFQUARTERS) of mpvar
+  !End of Quarter Stock Levels for each quarter
+end-declarations
+
+!We run the loop from 1 to 8 for the number of digits in the STUDENTNUMBER
+forall ( i in 1..8 ) do
+  STUDENTNUMBERTEMP(9-i) := STUDENTNUMBER mod 10
+  !We use the 'mod' operator to read the digits from the last and we populate the STUDENTNUMBERTEMP array backwards
+  if (STUDENTNUMBERTEMP(9-i) = 0) then
+    STUDENTNUMBERTEMP(9-i) := 5
+  !If the Digit in the STUDENTNUMBER is 0, we replace it with 5 in our STUDENTNUMBERTEMP array
+  end-if
+  STUDENTNUMBER := integer(STUDENTNUMBER / 10)
+  !Once the Digit is used, we remove it from the original STUDENTNUMBER
+end-do
+
+writeln("Student Number with replacements made:")
+forall (i in 1..8) do
+  write(STUDENTNUMBERTEMP(i))
+end-do
+writeln(" ")
+!Test printing to validate STUDENTNUMBER
+
+  !Define model as Cost objective function and constraints to include all Normal Production, OverProduction, Fluctuations in Production and Inventory Costs
+Cost := INVENTORYUNITCOST * sum(i in NUMBEROFQUARTERS) EndOfQuarterStock(i) +
+          PRODCHANGEUNITCOST * ( sum(i in NUMBEROFQUARTERS) (Increase(i) + Decrease(i)) ) +
+          PRODUCTIONCOST * sum(i in OTHERCONSTRAINTS) NormalProduction(i) +
+          ((12 * 10) + STUDENTNUMBERTEMP(3)) * OverProdCapacity(1) + ((13 * 10) + STUDENTNUMBERTEMP(4)) * OverProdCapacity(2) +
+          ((14 * 10) + STUDENTNUMBERTEMP(5)) * OverProdCapacity(3) + ((13 * 10) + STUDENTNUMBERTEMP(6)) * OverProdCapacity(4)
+
+  !Define Constraints for Increase and Decrease in Production
+Increase(0)   = 0
+Decrease(0)   = 0
+
+!Define Constraints for the starting and ending Total Production Levels
+Production(0) = BASEPRODLEVEL
+Production(5) = BASEPRODLEVEL
+
+!Define Constraints for the starting and ending Normal Production Levels
+NormalProduction(0) = BASEPRODLEVEL
+NormalProduction(1) <= 100
+NormalProduction(2) <= 100
+NormalProduction(3) <= 100
+NormalProduction(4) <= 100
+NormalProduction(5) = BASEPRODLEVEL
+
+!Define Constraints for the starting and ending Inventory / Stock Levels
+EndOfQuarterStock(0) = STARTANDENDSTOCK
+EndOfQuarterStock(1) <= 60
+EndOfQuarterStock(2) <= 60
+EndOfQuarterStock(3) <= 60
+EndOfQuarterStock(4) = STARTANDENDSTOCK
+
+!Define Constraints for the Over Production capacities per quarter
+OverProdCapacity(0) = 0
+OverProdCapacity(1) <= 40
+OverProdCapacity(2) <= 60
+OverProdCapacity(3) <= 90
+OverProdCapacity(4) <= 80
+OverProdCapacity(5) = 0
+
+forall ( i in NUMBEROFCONSTRAINTS ) do
+  ProdConstr(i) := Production(i) = Production(i-1) - Decrease(i) + Increase(i)
+end-do
+
+forall ( i in OTHERCONSTRAINTS ) do
+  OverProdConstr(i) := OverProdCapacity(i) = Production(i) - 100
+end-do
+
+forall ( i in NUMBEROFCONSTRAINTS ) do
+  NormalProdConstr(i) := NormalProduction(i) = Production(i) - OverProdCapacity(i)
+end-do
+
+forall ( i in OTHERCONSTRAINTS ) do
+  StockConstr(i):= EndOfQuarterStock(i)   = EndOfQuarterStock(i-1) + Production(i) - DEMAND(i)
+end-do
+
+
+!forall ( i in NUMBEROFQUARTERS ) do
+!  Production(i) is_integer
+!  Increase(i)   is_integer
+!  Decrease(i)   is_integer
+!  NormalProduction(i) is_integer
+!  OverProdCapacity(i) is_integer
+!  EndOfQuarterStock(i)   is_integer
+!end-do
+
+! Solve the model
+minimise(Cost)
+
+! Now output informtion to the user
+! To make columns align, use strfmt(...,3) to make all output 3 characters wide
+writeln("Minimum Total Cost for 4 Quarters (Q1 to Q4): ", getobjval)
+writeln(" ")
+write("Quarter:       ")
+forall ( i in NUMBEROFQUARTERS ) do
+  write("  ", strfmt(i,3) )
+end-do
+writeln(" ")
+write("NormalProduction:")
+forall ( i in NUMBEROFQUARTERS ) do
+  write("  ", strfmt(getsol(NormalProduction(i)),3) )
+end-do
+writeln(" ")
+write("OverProduction:  ")
+forall ( i in NUMBEROFQUARTERS ) do
+  write(strfmt(getsol(OverProdCapacity(i)),3),"  ")
+end-do
+writeln(" ")
+write("TotalProduction: ")
+forall ( i in NUMBEROFQUARTERS ) do
+  write("  ", strfmt(getsol(Production(i)),3) )
+end-do
+writeln(" ")
+write("Increase:      ")
+forall ( i in NUMBEROFQUARTERS ) do
+  write("  ", strfmt(getsol(Increase(i)),3) )
+end-do
+writeln(" ")
+write("Decrease:      ")
+forall ( i in NUMBEROFQUARTERS ) do
+  write("  ", strfmt(getsol(Decrease(i)),3) )
+end-do
+writeln(" ")
+write("Demand:        ")
+forall ( i in NUMBEROFQUARTERS ) do
+  write("  ", strfmt(getsol(DEMAND(i)),3) )
+end-do
+writeln(" ")
+write("EndOfQrtrStock:  ")
+forall ( i in NUMBEROFQUARTERS ) do
+  write(strfmt(getsol(EndOfQuarterStock(i)),3),"  ")
+end-do
+writeln(" ")
+writeln(" ")
+
+writeln("In case of IP solutions, the error appears for sensitivity analysis.
+Due to the discontinuous nature of integer programming (IP), we cannot identify the sensitivity of its optimal solution w.r.t small changes in our parameters.
+This is because the IP solution will no longer be optimal since it doesn’t satisfy the integer restrictions placed on the parameters anymore.")
+
+writeln("We perform our sensitivity analysis and calculate the dual/shadow price of constraints and reduced costs of variables from Q1 through Q4.")
+
+writeln("Total Production Constraint")
+forall ( i in NUMBEROFCONSTRAINTS ) do
+  writeln( i, ": Shadow/Dual Price: ", getdual(ProdConstr(i)),
+  	       "; Sensitivity Range is between ", getsensrng(2, ProdConstr(i))," and ",getsensrng(1, ProdConstr(i)),
+  	       "; Slack/Surplus: ", getslack(ProdConstr(i)) )
+end-do
+writeln(" ")
+
+writeln("Normal Production Constraint")
+forall ( i in NUMBEROFCONSTRAINTS ) do
+  writeln( i, ": Shadow/Dual Price: ", getdual(NormalProdConstr(i)),
+  	       "; Sensitivity Range is between ", getsensrng(2, NormalProdConstr(i))," and ",getsensrng(1, NormalProdConstr(i)),
+  	       "; Slack/Surplus: ", getslack(NormalProdConstr(i)) )
+end-do
+writeln(" ")
+
+writeln("Over Production Constraint")
+forall ( i in OTHERCONSTRAINTS ) do
+  writeln( i, ": Shadow/Dual Price: ", getdual(OverProdConstr(i)),
+  	       "; Sensitivity Range is between ", getsensrng(2, OverProdConstr(i))," and ",getsensrng(1, OverProdConstr(i)),
+  	       "; Slack/Surplus: ", getslack(OverProdConstr(i)) )
+end-do
+writeln(" ")
+
+writeln("Stock/Inventory Constraint")
+forall ( i in OTHERCONSTRAINTS ) do
+  writeln( i, ": Shadow/Dual Price: ", getdual(StockConstr(i)),
+  	       "; Sensitivity Range is between ", getsensrng(2, StockConstr(i))," and ",getsensrng(1, StockConstr(i)),
+  	       "; Slack/Surplus: ", getslack(StockConstr(i)))
+end-do
+writeln(" ")
+end-model
